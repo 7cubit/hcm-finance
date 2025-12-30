@@ -1,0 +1,45 @@
+# HCMJ Finance - Local Development Infrastructure
+
+services:
+  # PostgreSQL 16 Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: hcmj-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hcmj_user
+      POSTGRES_PASSWORD: hcmj_password_dev
+      POSTGRES_DB: hcmj_finance
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hcmj_user -d hcmj_finance']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: hcmj-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: hcmj-network

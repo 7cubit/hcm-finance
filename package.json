@@ -4,9 +4,19 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
+    "dev:api": "turbo run dev --filter=api",
+    "dev:web": "turbo run dev --filter=web",
     "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types"
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "check-types": "turbo run check-types",
+    "db:generate": "npm run db:generate --workspace=@hcmj/database",
+    "db:push": "npm run db:push --workspace=@hcmj/database",
+    "db:migrate": "npm run db:migrate --workspace=@hcmj/database",
+    "db:studio": "npm run db:studio --workspace=@hcmj/database",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "verify": "node scripts/verify-connection.js"
   },
   "devDependencies": {
     "prettier": "^3.7.4",

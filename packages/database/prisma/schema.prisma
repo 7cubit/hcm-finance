@@ -1,0 +1,552 @@
+// HCMJ Finance - Fund Accounting Database Schema
+// Phase 2: Church-specific fund accounting with split transactions
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// CORE: Fund Accounting System
+// ============================================
+
+/// Logical ministry buckets (e.g., General Fund, Building Fund)
+model Fund {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String?
+  isRestricted Boolean  @default(false) // Restricted funds have specific purposes
+  isActive     Boolean  @default(true)
+  color        String? // For UI display
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  splits  TransactionSplit[]
+  budgets Budget[]
+
+  @@map("funds")
+}
+
+/// Physical money storage (e.g., HDFC Bank, Petty Cash, Stripe)
+model Account {
+  id            String      @id @default(cuid())
+  name          String      @unique
+  type          AccountType
+  accountNumber String? // Masked for security
+  bankName      String?
+  balance       Decimal     @default(0) @db.Decimal(14, 2)
+  currency      String      @default("JPY")
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relations
+  transactions Transaction[]
+
+  @@map("accounts")
+}
+
+/// Master ledger - every financial movement
+model Transaction {
+  id           String          @id @default(cuid())
+  date         DateTime        @default(now())
+  type         TransactionType
+  amount       Decimal         @db.Decimal(14, 2)
+  currency     String          @default("JPY")
+  payee        String? // Who paid or received
+  description  String
+  referenceNo  String?         @unique // Check number, transfer ref, etc.
+  receiptUrl   String? // Cloud storage URL for receipt image
+  isReconciled Boolean         @default(false)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  deletedAt    DateTime?       // Soft delete support
+
+  // Relations
+  accountId     String
+  account       Account            @relation(fields: [accountId], references: [id])
+  donorId       String?
+  donor         Donor?             @relation(fields: [donorId], references: [id])
+  beneficiaryId String?
+  beneficiary   Beneficiary?       @relation(fields: [beneficiaryId], references: [id])
+  recordedById  String
+  recordedBy    User               @relation("RecordedTransactions", fields: [recordedById], references: [id])
+  splits        TransactionSplit[]
+
+  @@index([date])
+  @@index([type])
+  @@index([description])
+  @@index([amount])
+  @@map("transactions")
+}
+
+/// CRITICAL: Split one transaction across multiple funds
+/// Example: $100 offering = $50 General + $30 Building + $20 Missions
+model TransactionSplit {
+  id        String   @id @default(cuid())
+  amount    Decimal  @db.Decimal(14, 2)
+  note      String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  fundId        String
+  fund          Fund        @relation(fields: [fundId], references: [id])
+
+  @@index([transactionId])
+  @@index([fundId])
+  @@map("transaction_splits")
+}
+
+// ============================================
+// PEOPLE: Donors & Beneficiaries
+// ============================================
+
+/// Donors - people who give to the church
+model Donor {
+  id                  String         @id @default(cuid())
+  donorId             String         @unique // Custom ID like "D-001"
+  firstName           String
+  lastName            String
+  email               String?
+  phone               String?
+  address             String?
+  taxId               String? // Encrypted - for tax receipts (My Number in Japan)
+  anonymityPreference AnonymityLevel @default(NAMED)
+  isActive            Boolean        @default(true)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  // Relations
+  transactions Transaction[]
+
+  @@map("donors")
+}
+
+/// Beneficiaries - people the church helps (widows, orphans, etc.)
+model Beneficiary {
+  id              String              @id @default(cuid())
+  beneficiaryId   String              @unique // Custom ID like "B-001"
+  firstName       String
+  lastName        String
+  category        BeneficiaryCategory
+  phone           String?
+  address         String?
+  privateIdentity Boolean             @default(true) // Hide from reports
+  notes           String?
+  isActive        Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  // Relations
+  transactions Transaction[]
+
+  @@map("beneficiaries")
+}
+
+// ============================================
+// CONTROL: Budgets & Access
+// ============================================
+
+/// Monthly spending limits per fund
+model Budget {
+  id        String   @id @default(cuid())
+  month     Int // 1-12
+  year      Int
+  amount    Decimal  @db.Decimal(14, 2) // Budgeted amount
+  spent     Decimal  @default(0) @db.Decimal(14, 2) // Actual spent
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  fundId String
+  fund   Fund   @relation(fields: [fundId], references: [id])
+
+  @@unique([fundId, month, year])
+  @@map("budgets")
+}
+
+/// Users with role-based access
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String // Hashed
+  name          String
+  phone         String?
+  role          UserRole  @default(VIEWER)
+  isActive      Boolean   @default(true)
+  isTrainedUser Boolean   @default(false) // Phase 18: Sandbox training completion
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  transactions Transaction[] @relation("RecordedTransactions")
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+/// Track all changes for accountability (Phase 17 Enhanced)
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String   // APPROVE, REJECT, MODIFY, ACCESS, ACCESS_DENIED, CREATE, UPDATE, DELETE
+  entityType  String   // StagingTransaction, Department, etc.
+  entityId    String   // ID of the affected record
+  userEmail   String?  // Email of the user who performed the action
+  ipAddress   String?
+  userAgent   String?
+  beforeState String?  @db.Text // JSON string of previous state
+  afterState  String?  @db.Text // JSON string of new state
+  metadata    String?  @db.Text // Additional context (JSON)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// SHEET INTEGRATION: Google Workspace Mapping
+// ============================================
+
+/// Linking Sheets to Departments for automated sync
+model Department {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  budgetLimit Decimal  @db.Decimal(14, 2)
+  headEmail   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  externalSheets ExternalSheet[]
+  editRequests   EditRequest[]
+
+  @@map("departments")
+}
+
+/// Google Sheets that map to church departments
+model ExternalSheet {
+  id            String   @id @default(cuid())
+  googleSheetId String   @unique
+  driveUrl      String
+  isActive      Boolean  @default(true)
+  isSandbox     Boolean  @default(false) // Phase 18: Sandbox training mode
+  lockedMonths  String[] @default([])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  departmentId        String
+  department          Department           @relation(fields: [departmentId], references: [id])
+  fiscalYearId        String
+  fiscalYear          FiscalYear           @relation(fields: [fiscalYearId], references: [id])
+  users               SheetUser[]
+  stagingTransactions StagingTransaction[]
+  sandboxTransactions SandboxTransaction[]
+  syncLogs            SyncLog[]
+
+  @@index([googleSheetId])
+  @@map("external_sheets")
+}
+
+/// Users assigned to specific department sheets
+model SheetUser {
+  id         String    @id @default(cuid())
+  email      String
+  role       SheetRole @default(VIEWER)
+  isOrgEmail Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  // Relations
+  externalSheetId String
+  externalSheet   ExternalSheet @relation(fields: [externalSheetId], references: [id], onDelete: Cascade)
+
+  @@map("sheet_users")
+}
+
+/// Transactions imported from Sheets before manual approval
+model StagingTransaction {
+  id            String        @id @default(cuid())
+  sheetRowIndex Int
+  sheetTabName  String?
+  rawDataHash   String
+  amount        Decimal       @db.Decimal(14, 2)
+  description   String?
+  category      String?
+  date          DateTime?
+  receiptUrl    String?
+  thumbnailUrl  String?
+  isMissingReceipt Boolean @default(false)
+  status        StagingStatus @default(PENDING)
+  syncUuid      String        @unique // Written back to Sheet for tracking
+  note          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?     // Soft delete support
+
+  // Relations
+  externalSheetId String
+  externalSheet   ExternalSheet @relation(fields: [externalSheetId], references: [id], onDelete: Cascade)
+  anomalies       Anomaly[]
+
+  @@index([syncUuid])
+  @@index([status])
+  @@index([description])
+  @@index([amount])
+  @@map("staging_transactions")
+}
+
+/// Phase 13: Anomaly & Fraud Detection
+model Anomaly {
+  id                   String          @id @default(cuid())
+  type                 String          // DUPLICATE, SPIKE, KEYWORD, VELOCITY, CURRENCY, DATE
+  severity             AnomalySeverity
+  description          String
+  isIgnored            Boolean         @default(false)
+  ignoredByEmail       String?
+  createdAt            DateTime        @default(now())
+
+  // Relations
+  stagingTransactionId String
+  stagingTransaction   StagingTransaction @relation(fields: [stagingTransactionId], references: [id], onDelete: Cascade)
+
+  @@index([type])
+  @@map("anomalies")
+}
+
+model VendorWhitelist {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  category  String?
+  createdAt DateTime @default(now())
+  
+  @@map("vendor_whitelist")
+}
+
+/// Phase 18: Sandbox transactions for training mode (mirrors StagingTransaction)
+model SandboxTransaction {
+  id            String        @id @default(cuid())
+  sheetRowIndex Int
+  sheetTabName  String?
+  rawDataHash   String
+  amount        Decimal       @db.Decimal(14, 2)
+  description   String?
+  category      String?
+  date          DateTime?
+  receiptUrl    String?
+  thumbnailUrl  String?
+  status        StagingStatus @default(PENDING)
+  syncUuid      String        @unique
+  note          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  externalSheetId String
+  externalSheet   ExternalSheet @relation(fields: [externalSheetId], references: [id], onDelete: Cascade)
+
+  @@index([syncUuid])
+  @@index([status])
+  @@map("sandbox_transactions")
+}
+
+/// Phase 18: Bug/feedback reports from training users
+model TrainingFeedback {
+  id          String   @id @default(cuid())
+  userEmail   String
+  feedbackType String  // BUG, SUGGESTION, QUESTION
+  message     String
+  screenshot  String?
+  status      String   @default("OPEN") // OPEN, REVIEWED, RESOLVED
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+
+  @@map("training_feedback")
+}
+
+/// Phase 19: Notification delivery log
+model NotificationLog {
+  id           String   @id @default(cuid())
+  type         String   // EMAIL, SMS, SHEET_COMMENT
+  eventType    String   // ROW_REJECTED, MONTH_LOCKED, BUDGET_EXCEEDED, WEEKLY_DIGEST, UNLOCK_REQUEST
+  recipient    String   // Email or phone
+  subject      String?
+  content      String?  @db.Text
+  status       String   @default("PENDING") // PENDING, SENT, DELIVERED, BOUNCED, FAILED
+  messageId    String?  // External provider message ID
+  errorMessage String?
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  createdAt    DateTime @default(now())
+
+  // Relations
+  userId String?
+
+  @@index([status])
+  @@index([eventType])
+  @@index([recipient])
+  @@map("notification_logs")
+}
+
+/// Phase 19: User notification preferences
+model NotificationPreference {
+  id             String  @id @default(cuid())
+  userId         String  @unique
+  emailEnabled   Boolean @default(true)
+  smsEnabled     Boolean @default(false)
+  digestEnabled  Boolean @default(true)
+  digestDay      String  @default("MONDAY") // Day of week
+  
+  // Granular event preferences
+  rowRejected    Boolean @default(true)
+  monthLocked    Boolean @default(true)
+  budgetExceeded Boolean @default(true)
+  unlockRequest  Boolean @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("notification_preferences")
+}
+
+enum AnomalySeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// History of sheet sync operations
+model SyncLog {
+  id            String   @id @default(cuid())
+  lastSync      DateTime @default(now())
+  rowsProcessed Int
+  status        String? // SUCCESS/ERROR
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+
+  // Relations
+  externalSheetId String
+  externalSheet   ExternalSheet @relation(fields: [externalSheetId], references: [id], onDelete: Cascade)
+
+  @@map("sync_logs")
+}
+
+/// Requests to unlock historically closed months
+model EditRequest {
+  id               String        @id @default(cuid())
+  month            String        // Full name like "January"
+  year             Int
+  reason           String
+  status           RequestStatus @default(PENDING)
+  requestedByEmail String
+  approvedByEmail  String?
+  expiresAt        DateTime?     // For the 24h window
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // Relations
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+
+  @@map("edit_requests")
+}
+
+/// Managing open/closed financial periods
+model FiscalYear {
+  id        String   @id @default(cuid())
+  year      Int      @unique
+  startDate DateTime
+  endDate   DateTime
+  isOpen    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  externalSheets ExternalSheet[]
+
+  @@map("fiscal_years")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum AccountType {
+  BANK // Bank account
+  CASH // Petty cash box
+  ONLINE // Payment gateway (Stripe, PayPal)
+  MOBILE // Mobile payment (PayPay, LINE Pay)
+  INVESTMENT // Investment account
+}
+
+enum TransactionType {
+  INCOME // Money coming in
+  EXPENSE // Money going out
+  TRANSFER // Between accounts
+}
+
+enum UserRole {
+  SUPER_ADMIN // Full access, can delete
+  TREASURER // Full financial access
+  AUDITOR // Read-only, all data
+  STAFF // Limited input access
+  VIEWER // Dashboard only
+}
+
+enum AnonymityLevel {
+  NAMED // Full name in reports
+  ANONYMOUS // "Anonymous Donor" in reports
+  PRIVATE // Hidden from all reports
+}
+
+enum BeneficiaryCategory {
+  WIDOW
+  ORPHAN
+  ELDERLY
+  DISABLED
+  UNEMPLOYED
+  STUDENT
+  REFUGEE
+  OTHER
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+}
+
+enum SheetRole {
+  EDITOR
+  VIEWER
+}
+
+enum StagingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
