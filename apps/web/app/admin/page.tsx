@@ -1,29 +1,31 @@
-'use client';
-
-import { useState, useEffect } from 'react';
-import { 
-  Wallet, 
-  DollarSign, 
-  Users, 
-  Cloud, 
-  ArrowUpRight, 
-  ShieldCheck, 
-  Rocket, 
-  FileText, 
-  Globe, 
-  Moon,
+import {
+  Wallet,
+  DollarSign,
+  Users,
+  Cloud,
+  ArrowUpRight,
+  ShieldCheck,
+  Rocket,
+  FileText,
+  Globe,
 } from 'lucide-react';
+import { AdminClock } from './AdminClock';
 
-export default function AdminDashboard() {
-  const [currentTime, setCurrentTime] = useState<string>('');
+async function getStats() {
+  // In a real app, this would fetch from the serverClient
+  // const res = await serverClient('/admin/stats');
+  // return res.json();
 
-  useEffect(() => {
-    setCurrentTime(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-    const timer = setInterval(() => {
-      setCurrentTime(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  return {
+    donations: '¥24.8M',
+    revenue: '¥2.4M',
+    members: '1,240',
+    status: 'STABLE'
+  };
+}
+
+export default async function AdminDashboard() {
+  const stats = await getStats();
 
   return (
     <main>
@@ -42,10 +44,7 @@ export default function AdminDashboard() {
           </div>
         </div>
         <div className="text-right">
-          <div className="text-3xl font-mono font-medium text-slate-900 flex items-center gap-2">
-            <Globe className="text-secondary" size={28} />
-            {currentTime}
-          </div>
+          <AdminClock />
         </div>
       </div>
 
@@ -66,7 +65,7 @@ export default function AdminDashboard() {
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Total Donations</h3>
           </div>
           <div className="text-4xl font-mono font-bold text-slate-900 mb-1">
-            ¥24.8M
+            {stats.donations}
           </div>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Lifetime Acquisition</p>
           <div className="absolute -bottom-4 -left-4 w-24 h-24 bg-primary/20 rounded-full blur-2xl group-hover:bg-primary/30 transition-all" />
@@ -86,7 +85,7 @@ export default function AdminDashboard() {
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Fiscal Month</h3>
           </div>
           <div className="text-4xl font-mono font-bold text-slate-900 mb-1">
-            ¥2.4M
+            {stats.revenue}
           </div>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Estimated Revenue</p>
           <div className="absolute -bottom-4 -right-4 w-24 h-24 bg-secondary/20 rounded-full blur-2xl group-hover:bg-secondary/30 transition-all" />
@@ -106,7 +105,7 @@ export default function AdminDashboard() {
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Active Members</h3>
           </div>
           <div className="text-4xl font-mono font-bold text-slate-900 mb-1">
-            1,240
+            {stats.members}
           </div>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Verified Accounts</p>
         </div>
@@ -125,7 +124,7 @@ export default function AdminDashboard() {
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Cloud Status</h3>
           </div>
           <div className="text-4xl font-mono font-bold text-slate-900 mb-1 tracking-tight">
-            STABLE
+            {stats.status}
           </div>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Node Latency: 24ms</p>
         </div>
@@ -170,7 +169,7 @@ export default function AdminDashboard() {
               Review Orders
               <div className="absolute inset-0 rounded-lg ring-2 ring-white/20 group-hover:ring-white/40 transition-all" />
             </button>
-            <button 
+            <button
               onClick={() => window.location.href = '/admin/departments'}
               className="group w-full flex items-center justify-center gap-3 px-6 py-3 bg-transparent border border-slate-300 text-slate-700 rounded-lg font-bold uppercase tracking-wider text-sm hover:bg-slate-100 hover:text-slate-900 transition-all"
             >
@@ -189,14 +188,9 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="fixed bottom-6 left-6 z-50">
-        <button 
-          className="w-10 h-10 rounded-full bg-slate-200 text-slate-800 flex items-center justify-center shadow-lg hover:scale-110 transition-transform" 
-          onClick={() => document.documentElement.classList.toggle('dark')}
-        >
-          <Moon size={16} />
-        </button>
-      </div>
+      <p className="fixed bottom-6 left-6 z-50 text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+        Secure Terminal v1.0.4
+      </p>
     </main>
   );
 }

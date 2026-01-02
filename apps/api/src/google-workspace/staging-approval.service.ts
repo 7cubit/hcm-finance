@@ -4,6 +4,7 @@ import { SheetFeedbackService } from './sheet-feedback.service';
 import { AnomalyEngineService } from './anomaly-engine.service';
 import { AuditLogService } from '../common/audit-log.service';
 import { SanitizerService } from '../common/sanitizer.service';
+import { ReceiptPreservationService } from './receipt-preservation.service';
 
 const prisma = new PrismaClient();
 
@@ -16,10 +17,11 @@ export class StagingApprovalService {
     private readonly anomalyEngine: AnomalyEngineService,
     private readonly auditLog: AuditLogService,
     private readonly sanitizer: SanitizerService,
-  ) {}
+    private readonly receiptService: ReceiptPreservationService,
+  ) { }
 
   async getPendingApprovals(departmentId?: string) {
-    return prisma.stagingTransaction.findMany({
+    const items = await prisma.stagingTransaction.findMany({
       where: {
         status: StagingStatus.PENDING,
         ...(departmentId ? { externalSheet: { departmentId } } : {}),
@@ -36,21 +38,27 @@ export class StagingApprovalService {
       },
       orderBy: { date: 'desc' },
     });
+
+    // Resolve signed URLs for receipts
+    return Promise.all(items.map(async (item) => ({
+      ...item,
+      receiptUrl: item.receiptUrl ? await this.receiptService.getSignedUrl(item.receiptUrl) : null,
+    })));
   }
 
   async approve(
-    id: string, 
-    adminUserId: string, 
+    id: string,
+    adminUserId: string,
     adminUserEmail: string,
     ipAddress: string,
     correctedCategory?: string
   ) {
     const staging = await prisma.stagingTransaction.findUnique({
       where: { id },
-      include: { 
-        externalSheet: { 
-          include: { department: true } 
-        } 
+      include: {
+        externalSheet: {
+          include: { department: true }
+        }
       },
     });
 
@@ -60,8 +68,8 @@ export class StagingApprovalService {
     }
 
     // Sanitize category input
-    const sanitizedCategory = correctedCategory 
-      ? this.sanitizer.sanitizeString(correctedCategory) 
+    const sanitizedCategory = correctedCategory
+      ? this.sanitizer.sanitizeString(correctedCategory)
       : staging.category;
 
     // 1. Move to Ledger (Transaction model)
@@ -80,7 +88,7 @@ export class StagingApprovalService {
         splits: {
           create: {
             amount: staging.amount,
-            fundId: (await prisma.fund.findFirst())?.id || '', 
+            fundId: (await prisma.fund.findFirst())?.id || '',
           }
         }
       }
@@ -89,7 +97,7 @@ export class StagingApprovalService {
     // 2. Update Staging Status
     await prisma.stagingTransaction.update({
       where: { id },
-      data: { 
+      data: {
         status: StagingStatus.APPROVED,
         category: sanitizedCategory,
       },
@@ -130,8 +138,8 @@ export class StagingApprovalService {
   }
 
   async reject(
-    id: string, 
-    adminUserId: string, 
+    id: string,
+    adminUserId: string,
     adminUserEmail: string,
     ipAddress: string,
     reason: string
@@ -149,7 +157,7 @@ export class StagingApprovalService {
     // 1. Update Staging Status
     await prisma.stagingTransaction.update({
       where: { id },
-      data: { 
+      data: {
         status: StagingStatus.REJECTED,
         note: sanitizedReason,
       },

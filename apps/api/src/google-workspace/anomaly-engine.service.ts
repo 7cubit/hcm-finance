@@ -11,7 +11,7 @@ export class AnomalyEngineService {
   private readonly SUSPICIOUS_KEYWORDS = ['gift', 'personal', 'loan'];
   private readonly FORBIDDEN_CURRENCY_SYMBOLS = ['$', '€', '£', 'btc', 'eth'];
 
-  constructor(private readonly notificationService: NotificationService) {}
+  constructor(private readonly notificationService: NotificationService) { }
 
   /**
    * Scan a staging transaction for potential risks
@@ -19,15 +19,16 @@ export class AnomalyEngineService {
   async scanTransaction(txId: string, rawAmountStr?: string) {
     const tx = await prisma.stagingTransaction.findUnique({
       where: { id: txId },
-      include: { 
+      include: {
         externalSheet: { include: { department: true } },
-        anomalies: true 
+        anomalies: true
       }
     });
 
     if (!tx) return;
 
     await this.checkDuplicates(tx);
+    await this.checkHighRisk(tx);
     await this.checkSpikes(tx);
     await this.checkKeywords(tx);
     await this.checkCurrency(tx, rawAmountStr);
@@ -49,8 +50,18 @@ export class AnomalyEngineService {
     });
 
     if (duplicates.length > 0) {
-      await this.createAnomaly(tx.id, 'DUPLICATE', AnomalySeverity.MEDIUM, 
+      await this.createAnomaly(tx.id, 'DUPLICATE', AnomalySeverity.MEDIUM,
         `Duplicate amount/desc found in ${duplicates[0].externalSheet.department.name}`);
+    }
+  }
+
+  private async checkHighRisk(tx: any) {
+    const amount = Number(tx.amount);
+    const HIGH_RISK_THRESHOLD = 75000; // ¥75,000 (~$500)
+
+    if (amount >= HIGH_RISK_THRESHOLD) {
+      await this.createAnomaly(tx.id, 'HIGH_RISK', AnomalySeverity.HIGH,
+        `Transaction of ¥${amount.toLocaleString()} exceeds safety threshold of ¥${HIGH_RISK_THRESHOLD.toLocaleString()}.`);
     }
   }
 
@@ -59,7 +70,7 @@ export class AnomalyEngineService {
     const amount = Number(tx.amount);
 
     if (amount > budgetLimit * 0.5) {
-      await this.createAnomaly(tx.id, 'SPIKE', AnomalySeverity.HIGH, 
+      await this.createAnomaly(tx.id, 'SPIKE', AnomalySeverity.HIGH,
         `Large spending: ¥${amount.toLocaleString()} is > 50% of monthly department limit.`);
     }
   }
@@ -70,7 +81,7 @@ export class AnomalyEngineService {
     const found = this.SUSPICIOUS_KEYWORDS.filter(k => desc.includes(k));
 
     if (found.length > 0) {
-      await this.createAnomaly(tx.id, 'KEYWORD', AnomalySeverity.MEDIUM, 
+      await this.createAnomaly(tx.id, 'KEYWORD', AnomalySeverity.MEDIUM,
         `Suspicious keywords: ${found.join(', ')}`);
     }
   }
@@ -80,7 +91,7 @@ export class AnomalyEngineService {
     const found = this.FORBIDDEN_CURRENCY_SYMBOLS.filter(s => textToSearch.includes(s));
 
     if (found.length > 0) {
-      await this.createAnomaly(tx.id, 'CURRENCY', AnomalySeverity.LOW, 
+      await this.createAnomaly(tx.id, 'CURRENCY', AnomalySeverity.LOW,
         `Detected possible foreign currency symbol: ${found.join(' ')}`);
     }
   }
@@ -91,7 +102,7 @@ export class AnomalyEngineService {
     const day = date.getDay(); // 0: Sun, 6: Sat
 
     if (day === 0 || day === 6) {
-      await this.createAnomaly(tx.id, 'DATE', AnomalySeverity.LOW, 
+      await this.createAnomaly(tx.id, 'DATE', AnomalySeverity.LOW,
         `Dated on a weekend (${date.toLocaleDateString('en-US', { weekday: 'long' })}).`);
     }
   }
@@ -106,7 +117,7 @@ export class AnomalyEngineService {
       });
 
       for (const tx of txs) {
-        await this.createAnomaly(tx.id, 'VELOCITY', AnomalySeverity.MEDIUM, 
+        await this.createAnomaly(tx.id, 'VELOCITY', AnomalySeverity.MEDIUM,
           `Batch velocity alert: ${count} rows updated in one sync (Possible copy-paste error).`);
       }
     }
@@ -130,7 +141,7 @@ export class AnomalyEngineService {
   async sendSuspiciousDigest() {
     const threshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const anomalies = await prisma.anomaly.findMany({
-      where: { 
+      where: {
         isIgnored: false,
         severity: { in: ['MEDIUM', 'HIGH'] },
         createdAt: { gte: threshold }
@@ -143,7 +154,7 @@ export class AnomalyEngineService {
     });
 
     if (anomalies.length > 0) {
-      const summary = anomalies.map(a => 
+      const summary = anomalies.map(a =>
         `- [${a.type}] Dept: ${a.stagingTransaction.externalSheet.department.name}, Amt: ¥${Number(a.stagingTransaction.amount).toLocaleString()}, Issue: ${a.description}`
       ).join('\n');
 

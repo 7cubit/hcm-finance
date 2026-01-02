@@ -52,7 +52,7 @@ export class ReceiptPreservationService {
       const fileName = `${year}/${deptName}/${year}-${deptName}-${id}.pdf`; // Naming convention
       // Note: If it's an image, we should ideally keep extension, but prompt said .pdf
       // I'll use the original extension if possible or just follow naming
-      
+
       const destination = `${year}/${deptName}/${year}-${deptName}-${id}${path.extname(localPath) || '.pdf'}`;
       const gcsUrl = await this.uploadToGCS(localPath, destination);
 
@@ -63,7 +63,7 @@ export class ReceiptPreservationService {
           .resize(200, 200, { fit: 'cover' })
           .toFormat('webp')
           .toFile(thumbPath);
-        
+
         thumbnailUrl = await this.uploadToGCS(thumbPath, `thumbnails/${id}.webp`);
       } catch (sharpError) {
         this.logger.warn(`Could not generate thumbnail for ${id}: ${sharpError.message}`);
@@ -105,7 +105,7 @@ export class ReceiptPreservationService {
 
   private async uploadToGCS(localPath: string, destination: string): Promise<string> {
     const bucket = this.storage.bucket(this.bucketName);
-    
+
     // Check if bucket exists, create if not (in dev)
     if (process.env.NODE_ENV === 'development') {
       const [exists] = await bucket.exists();
@@ -150,6 +150,37 @@ export class ReceiptPreservationService {
           this.logger.error(`Cleanup failed for ${p}: ${e.message}`);
         }
       }
+    }
+  }
+
+  /**
+   * Generates a signed URL for a GCS object
+   */
+  async getSignedUrl(gcsUrl: string): Promise<string> {
+    if (!gcsUrl || !gcsUrl.startsWith('https://storage.googleapis.com/')) {
+      return gcsUrl; // Fallback for simple URLs
+    }
+
+    try {
+      const pathParts = gcsUrl.replace('https://storage.googleapis.com/', '').split('/');
+      const bucketName = pathParts.shift();
+      const fileName = pathParts.join('/');
+
+      if (!bucketName || !fileName) return gcsUrl;
+
+      const [url] = await this.storage
+        .bucket(bucketName)
+        .file(fileName)
+        .getSignedUrl({
+          version: 'v4',
+          action: 'read',
+          expires: Date.now() + 15 * 60 * 1000, // 15 minutes
+        });
+
+      return url;
+    } catch (error: any) {
+      this.logger.error(`Failed to generate signed URL: ${error.message}`);
+      return gcsUrl;
     }
   }
 

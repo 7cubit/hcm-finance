@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiClient } from '@/lib/apiClient';
 
 interface ApiResponse {
   message: string;
@@ -16,7 +17,7 @@ export default function HomePage() {
   useEffect(() => {
     async function fetchApi() {
       try {
-        const res = await fetch('http://127.0.0.1:3001/api/v1');
+        const res = await apiClient('/');
         if (!res.ok) throw new Error('API request failed');
         const data = await res.json();
         setApiData(data);

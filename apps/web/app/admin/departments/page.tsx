@@ -1,15 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { 
-  Building2, 
-  ExternalLink, 
-  Plus, 
-  Users, 
-  History, 
-  RefreshCcw, 
-  Shield, 
-  Mail, 
+import {
+  Building2,
+  ExternalLink,
+  Plus,
+  Users,
+  History,
+  RefreshCcw,
+  Shield,
+  Mail,
   Circle,
   TrendingUp,
   Settings2,
@@ -17,8 +17,13 @@ import {
   Lock,
   Unlock,
   Bell,
-  Clock
+  Clock,
+  AlertCircle,
+  CheckCircle2,
+  Settings,
+  LayoutGrid
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface SyncLog {
   id: string;
@@ -47,6 +52,7 @@ interface Department {
   id: string;
   name: string;
   budgetLimit: number;
+  spent: number; // Added for progress bar
   headEmail: string;
   externalSheets: ExternalSheet[];
   updatedAt: string;
@@ -62,6 +68,8 @@ interface UnlockRequest {
   department: { name: string };
   createdAt: string;
 }
+
+import { apiClient } from '@/lib/apiClient';
 
 export default function DepartmentsPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -81,22 +89,16 @@ export default function DepartmentsPage() {
 
   async function fetchRequests() {
     try {
-      const res = await fetch('http://127.0.0.1:3001/api/v1/unlock-requests/pending', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      });
+      const res = await apiClient('/unlock-requests/pending');
       if (res.ok) setRequests(await res.json());
-    } catch (e) { 
+    } catch (e) {
       // Silently fail - API may not be available
     }
   }
 
   async function fetchDepartments() {
     try {
-      const res = await fetch('http://127.0.0.1:3001/api/v1/departments', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const res = await apiClient('/departments');
       if (res.ok) {
         const data = await res.json();
         setDepartments(data);
@@ -109,30 +111,47 @@ export default function DepartmentsPage() {
   }
 
   async function handleCreate() {
+    if (!newDept.name || !newDept.headEmail || newDept.budgetLimit <= 0) return;
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticDept: Department = {
+      id: tempId,
+      name: newDept.name,
+      budgetLimit: newDept.budgetLimit,
+      spent: 0,
+      headEmail: newDept.headEmail,
+      externalSheets: [],
+      updatedAt: new Date().toISOString()
+    };
+
+    setDepartments([optimisticDept, ...departments]);
+    setShowCreateModal(false);
+
     try {
-      const res = await fetch('http://127.0.0.1:3001/api/v1/departments', {
+      const res = await apiClient('/departments', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
         body: JSON.stringify(newDept)
       });
+
       if (res.ok) {
-        setShowCreateModal(false);
-        fetchDepartments();
+        // Replace temp with real data
+        const saved = await res.json();
+        setDepartments(prev => prev.map(d => d.id === tempId ? { ...saved.department, spent: 0 } : d));
+      } else {
+        throw new Error('Failed to create department');
       }
     } catch (error) {
       console.error('Failed to create department:', error);
+      // Mark as error for retry
+      setDepartments(prev => prev.map(d => d.id === tempId ? { ...optimisticDept, id: `error-${Date.now()}` } : d));
     }
   }
 
   async function handleRegenerate(id: string) {
     if (!confirm('Are you sure? This will create a fresh Google Sheet for this year.')) return;
     try {
-      const res = await fetch(`http://127.0.0.1:3001/api/v1/departments/${id}/regenerate-sheet`, {
+      const res = await apiClient(`/departments/${id}/regenerate-sheet`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
       if (res.ok) fetchDepartments();
     } catch (error) {
@@ -142,9 +161,8 @@ export default function DepartmentsPage() {
 
   async function handleApproveRequest(id: string) {
     try {
-      const res = await fetch(`http://127.0.0.1:3001/api/v1/unlock-requests/${id}/approve`, {
+      const res = await apiClient(`/unlock-requests/${id}/approve`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
       if (res.ok) {
         fetchRequests();
@@ -158,20 +176,20 @@ export default function DepartmentsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-10">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
             Departments
           </h1>
-          <p className="text-slate-400">Manage church departments, budgets, and sync status.</p>
+          <p className="text-slate-400 font-medium">Manage church hubs, budgets, and Google Sheets factory.</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="relative">
-            <button 
+            <button
               onClick={() => setShowRequests(!showRequests)}
-              className="p-2.5 bg-white border border-slate-200 text-slate-500 hover:text-slate-700 rounded-xl transition-all relative"
+              className="p-2.5 bg-white border border-slate-200 text-slate-500 hover:text-purple-600 hover:border-purple-200 rounded-xl transition-all relative group"
             >
               <Bell size={20} />
               {requests.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse border-2 border-white">
                   {requests.length}
                 </span>
               )}
@@ -187,21 +205,21 @@ export default function DepartmentsPage() {
                   {requests.map(req => (
                     <div key={req.id} className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                       <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] font-bold text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded uppercase">
+                        <span className="text-[10px] font-bold text-purple-600 bg-purple-100 px-2 py-0.5 rounded uppercase">
                           {req.month}
                         </span>
-                        <span className="text-[10px] text-slate-500">{new Date(req.createdAt).toLocaleDateString()}</span>
+                        <span className="text-[10px] text-slate-400">{new Date(req.createdAt).toLocaleDateString()}</span>
                       </div>
-                      <p className="text-xs font-semibold mb-1">{req.department.name}</p>
-                      <p className="text-[10px] text-slate-400 mb-3 italic">"{req.reason}"</p>
+                      <p className="text-xs font-bold text-slate-900 mb-1">{req.department.name}</p>
+                      <p className="text-[10px] text-slate-500 mb-3 italic">"{req.reason}"</p>
                       <div className="flex gap-2">
-                        <button 
+                        <button
                           onClick={() => handleApproveRequest(req.id)}
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold py-2 rounded-lg transition-all"
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold py-2 rounded-lg transition-all shadow-md shadow-emerald-500/10"
                         >
                           Grant 24 Hours
                         </button>
-                        <button className="px-3 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg transition-all">
+                        <button className="px-3 bg-slate-100 hover:bg-slate-200 text-slate-400 rounded-lg transition-all">
                           &times;
                         </button>
                       </div>
@@ -212,9 +230,9 @@ export default function DepartmentsPage() {
               </div>
             )}
           </div>
-          <button 
+          <button
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-xl font-medium transition-all shadow-lg shadow-purple-500/20"
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-purple-500/20 active:scale-95"
           >
             <Plus size={20} />
             New Department
@@ -226,70 +244,158 @@ export default function DepartmentsPage() {
         <div className="flex justify-center py-20">
           <RefreshCcw className="animate-spin text-purple-500" size={40} />
         </div>
+      ) : departments.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-32 bg-white/50 border-2 border-dashed border-slate-200 rounded-3xl text-center">
+          <div className="w-24 h-24 bg-purple-100 rounded-full flex items-center justify-center mb-6">
+            <LayoutGrid className="text-purple-400" size={48} />
+          </div>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">No Departments yet</h3>
+          <p className="text-slate-500 max-w-sm mb-8">
+            Click the "+" button to start building your financial hubs and automate your Google Sheets factory.
+          </p>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-6 py-3 rounded-xl font-bold transition-all"
+          >
+            <Plus size={20} />
+            Add First Department
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Departments List */}
           <div className="space-y-6">
-            {departments.map((dept) => (
-              <div 
-                key={dept.id}
-                onClick={() => setSelectedDept(dept)}
-                className={`group relative bg-white border ${selectedDept?.id === dept.id ? 'border-purple-500/50 shadow-purple-500/5' : 'border-slate-200'} rounded-2xl p-6 cursor-pointer hover:border-slate-300 transition-all shadow-lg`}
-              >
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400">
-                      <Building2 size={24} />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-slate-900 group-hover:text-purple-600 transition-colors">{dept.name}</h3>
-                      <p className="text-slate-500 text-sm flex items-center gap-1">
-                        <Mail size={12} /> {dept.headEmail}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {dept.externalSheets?.[0]?.syncLogs?.[0]?.status === 'SUCCESS' ? (
-                      <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400 bg-green-400/10 px-2.5 py-1 rounded-full border border-green-400/20">
-                        <Circle size={8} fill="currentColor" />
-                        Healthy
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded-full border border-amber-400/20">
-                        <Circle size={8} fill="currentColor" />
-                        Unknown
-                      </span>
-                    )}
-                  </div>
-                </div>
+            <AnimatePresence mode="popLayout">
+              {departments.map((dept) => {
+                const isSyncing = dept.externalSheets?.[0]?.syncLogs?.[0]?.status === 'RUNNING';
+                const isNew = dept.id.startsWith('temp-');
+                const hasError = dept.id.startsWith('error-');
+                const lastSync = dept.externalSheets?.[0]?.syncLogs?.[0];
+                const spent = dept.spent || 0;
+                const percent = Math.min(100, (spent / dept.budgetLimit) * 100);
 
-                <div className="grid grid-cols-3 gap-4 border-t border-slate-200 pt-4 mt-2">
-                  <div>
-                    <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">Budget</p>
-                    <p className="text-slate-900 font-mono">¥{dept.budgetLimit.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">Last Sync</p>
-                    <p className="text-slate-300 text-sm">
-                      {dept.externalSheets?.[0]?.syncLogs?.[0]?.startedAt 
-                        ? new Date(dept.externalSheets[0].syncLogs[0].startedAt).toLocaleDateString()
-                        : 'Never'
-                      }
-                    </p>
-                  </div>
-                  <div className="flex justify-end items-center">
-                    <a 
-                      href={dept.externalSheets?.[0]?.driveUrl}
-                      target="_blank"
-                      className="text-slate-400 hover:text-white transition-colors p-2 hover:bg-slate-800 rounded-lg"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <ExternalLink size={20} />
-                    </a>
-                  </div>
-                </div>
-              </div>
-            ))}
+                return (
+                  <motion.div
+                    layout
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    key={dept.id}
+                    onClick={() => !isNew && setSelectedDept(dept)}
+                    className={`group relative bg-white border ${selectedDept?.id === dept.id
+                      ? 'border-purple-500 ring-4 ring-purple-500/5'
+                      : 'border-slate-200'
+                      } ${isNew || hasError ? 'opacity-80 cursor-wait' : 'cursor-pointer'} rounded-2xl p-6 hover:shadow-xl hover:border-slate-300 transition-all`}
+                  >
+                    <div className="flex justify-between items-start mb-6">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${hasError ? 'bg-red-100 text-red-500' : 'bg-purple-100 text-purple-600'
+                          }`}>
+                          {isNew ? <RefreshCcw className="animate-spin" size={24} /> : <Building2 size={24} />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-lg font-bold text-slate-900 group-hover:text-purple-600 transition-colors">
+                              {dept.name}
+                            </h3>
+                            {isNew && <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">Generating...</span>}
+                            {hasError && <span className="text-[10px] font-bold bg-red-100 text-red-500 px-2 py-0.5 rounded uppercase">Factory Error</span>}
+                          </div>
+                          <p className="text-slate-500 text-sm flex items-center gap-1">
+                            <Mail size={12} className="opacity-40" /> {dept.headEmail}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {isNew ? null : hasError ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCreate(); }}
+                            className="flex items-center gap-1.5 text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-full border border-red-200 transition-colors"
+                          >
+                            <RefreshCcw size={12} />
+                            Retry
+                          </button>
+                        ) : isSyncing ? (
+                          <span className="flex items-center gap-1.5 text-xs font-bold text-blue-500 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100">
+                            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: "linear" }}>
+                              <RefreshCcw size={12} />
+                            </motion.div>
+                            Syncing
+                          </span>
+                        ) : lastSync?.status === 'SUCCESS' ? (
+                          <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
+                            <CheckCircle2 size={12} />
+                            Synced
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
+                            <Clock size={12} />
+                            {lastSync?.startedAt ? new Date(lastSync.startedAt).toLocaleDateString() : 'Pending'}
+                          </span>
+                        )}
+
+                        {!isNew && !hasError && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSelectedDept(dept); }}
+                            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+                          >
+                            <Settings size={18} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Progress Bar (Spent vs Budget) */}
+                    <div className="mb-6">
+                      <div className="flex justify-between items-end mb-2">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Budget Utilization</span>
+                        <div className="text-right">
+                          <span className="text-sm font-bold text-slate-900 font-mono">¥{spent.toLocaleString()}</span>
+                          <span className="text-xs text-slate-400 font-mono"> / ¥{dept.budgetLimit.toLocaleString()}</span>
+                        </div>
+                      </div>
+                      <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden flex">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${percent}%` }}
+                          transition={{ duration: 1, ease: "easeOut" }}
+                          className={`h-full rounded-full ${percent > 90 ? 'bg-red-500' : percent > 75 ? 'bg-orange-500' : 'bg-purple-500'
+                            }`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-4 border-t border-slate-100">
+                      <div className="flex gap-4">
+                        <div className="flex items-center gap-1.5 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                          <History size={12} />
+                          {lastSync ? `Updated ${new Date(lastSync.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Not Synced'}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                          <Users size={12} />
+                          {dept.externalSheets?.[0]?.users?.length || 0} Members
+                        </div>
+                      </div>
+
+                      {!isNew && !hasError && dept.externalSheets?.[0]?.driveUrl && (
+                        <a
+                          href={dept.externalSheets[0].driveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-xs font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-4 py-2 rounded-xl transition-all border border-purple-100"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <LayoutGrid size={14} />
+                          Sheets
+                          <ExternalLink size={12} className="opacity-50" />
+                        </a>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           </div>
 
           {/* Department Detail / Editor */}
@@ -301,7 +407,7 @@ export default function DepartmentsPage() {
                   {selectedDept.name}
                 </h2>
                 <div className="flex gap-2">
-                  <button 
+                  <button
                     onClick={() => handleRegenerate(selectedDept.id)}
                     className="p-2 text-slate-400 hover:text-amber-400 hover:bg-amber-400/10 rounded-lg transition-all"
                     title="Regenerate Sheet"
@@ -318,7 +424,7 @@ export default function DepartmentsPage() {
               <div className="grid grid-cols-2 gap-4 mb-8">
                 <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl">
                   <p className="text-slate-500 text-xs mb-1">Monthly Budget</p>
-                  <input 
+                  <input
                     type="number"
                     value={selectedDept.budgetLimit}
                     className="bg-transparent text-xl font-bold text-white w-full outline-none focus:text-purple-400 transition-colors"
@@ -366,14 +472,14 @@ export default function DepartmentsPage() {
                 <div className="grid grid-cols-4 gap-2">
                   {["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((month) => {
                     const monthMap: any = {
-                      Jan: "January", Feb: "February", Mar: "March", Apr: "April", 
-                      May: "May", Jun: "June", Jul: "July", Aug: "August", 
+                      Jan: "January", Feb: "February", Mar: "March", Apr: "April",
+                      May: "May", Jun: "June", Jul: "July", Aug: "August",
                       Sep: "September", Oct: "October", Nov: "November", Dec: "December"
                     };
                     const fullName = monthMap[month];
                     const isLocked = selectedDept.externalSheets?.[0]?.lockedMonths?.includes(fullName);
                     const isCurrentMonth = fullName === new Date().toLocaleString('en-US', { month: 'long' });
-                    
+
                     return (
                       <button
                         key={month}
@@ -383,22 +489,20 @@ export default function DepartmentsPage() {
                           const action = isLocked ? 'unlock' : 'lock';
                           const sheetId = selectedDept.externalSheets?.[0]?.id;
                           if (!sheetId) return;
-                          
+
                           try {
-                            const res = await fetch(`http://127.0.0.1:3001/api/v1/google-workspace/locks/${sheetId}/${action}/${fullName}`, {
+                            const res = await apiClient(`/google-workspace/locks/${sheetId}/${action}/${fullName}`, {
                               method: 'POST',
-                              headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
                             });
                             if (res.ok) fetchDepartments();
                           } catch (e) { console.error(e); }
                         }}
-                        className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${
-                          isLocked 
-                            ? 'bg-red-500/10 border-red-500/30 text-red-500' 
-                            : isCurrentMonth
-                              ? 'bg-slate-900 border-slate-900 text-slate-700 cursor-not-allowed opacity-50'
-                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-purple-500/50 hover:text-purple-400'
-                        }`}
+                        className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${isLocked
+                          ? 'bg-red-500/10 border-red-500/30 text-red-500'
+                          : isCurrentMonth
+                            ? 'bg-slate-900 border-slate-900 text-slate-700 cursor-not-allowed opacity-50'
+                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-purple-500/50 hover:text-purple-400'
+                          }`}
                       >
                         <span className="text-[10px] font-bold mb-1">{month}</span>
                         {isLocked ? <Lock size={12} /> : <Unlock size={12} className="opacity-30" />}
@@ -410,86 +514,117 @@ export default function DepartmentsPage() {
 
               {/* Audit Logs / Sync History */}
               <div>
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <History size={16} />
-                  Sync History
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <History size={14} className="text-blue-400" />
+                  Sync Log
                 </h3>
-                <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden">
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
                   {selectedDept.externalSheets?.[0]?.syncLogs?.map((log) => (
-                    <div key={log.id} className="flex items-center gap-4 p-3 border-b border-slate-800 text-xs last:border-0">
-                      <div className={`w-1.5 h-1.5 rounded-full ${log.status === 'SUCCESS' ? 'bg-green-500' : 'bg-red-500'}`} />
-                      <span className="text-slate-400 font-mono">{new Date(log.startedAt).toLocaleTimeString()}</span>
-                      <span className="flex-1 truncate text-slate-500">{log.message || 'Sync completed successfully'}</span>
+                    <div key={log.id} className="flex items-center gap-4 p-4 text-xs">
+                      <div className={`w-2 h-2 rounded-full ${log.status === 'SUCCESS' ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-red-500'}`} />
+                      <span className="text-slate-400 font-mono font-bold tracking-tight">
+                        {new Date(log.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <span className="flex-1 truncate text-slate-600 font-medium">{log.message || 'Sync completed successfully'}</span>
                     </div>
                   ))}
                   {!selectedDept.externalSheets?.[0]?.syncLogs?.length && (
-                    <div className="p-4 text-center text-slate-600 text-xs">No logs available</div>
+                    <div className="p-8 text-center text-slate-400 text-xs italic">No sync activity recorded</div>
                   )}
                 </div>
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center bg-slate-900/50 border border-dashed border-slate-800 rounded-2xl p-20 text-slate-600 h-full">
-              <Building2 size={48} className="mb-4 opacity-20" />
-              <p>Select a department to manage settings and access</p>
+            <div className="flex flex-col items-center justify-center bg-white/50 border-2 border-dashed border-slate-200 rounded-3xl p-20 text-slate-400 h-full">
+              <Building2 size={64} className="mb-6 opacity-10" />
+              <p className="font-medium">Select a department hub to manage configurations</p>
             </div>
           )}
         </div>
       )}
 
-      {/* Create Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-md w-full shadow-2xl relative animate-in fade-in zoom-in duration-200">
-            <h2 className="text-2xl font-bold mb-6">Setup New Department</h2>
-            
-            <div className="space-y-5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Department Name</label>
-                <input 
-                  type="text"
-                  placeholder="e.g. Media Team"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 outline-none focus:border-purple-500 transition-colors"
-                  onChange={(e) => setNewDept({...newDept, name: e.target.value})}
-                />
+      {/* Create Modal (Shadcn-like Framer Motion) */}
+      <AnimatePresence>
+        {showCreateModal && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCreateModal(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white border border-slate-200 rounded-3xl p-10 max-w-lg w-full shadow-2xl relative z-10"
+            >
+              <div className="mb-8">
+                <h2 className="text-3xl font-bold text-slate-900 mb-2 tracking-tight">Setup New Department</h2>
+                <p className="text-slate-500 font-medium">This will initialize a new Google Sheet from the factory template.</p>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Monthly Budget (¥)</label>
-                <input 
-                  type="number"
-                  placeholder="50000"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 outline-none focus:border-purple-500 transition-colors"
-                  onChange={(e) => setNewDept({...newDept, budgetLimit: parseFloat(e.target.value)})}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Head of Department Email</label>
-                <input 
-                  type="email"
-                  placeholder="head@hcmj.org"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 outline-none focus:border-purple-500 transition-colors"
-                  onChange={(e) => setNewDept({...newDept, headEmail: e.target.value})}
-                />
-              </div>
-            </div>
 
-            <div className="flex gap-4 mt-10">
-              <button 
-                onClick={() => setShowCreateModal(false)}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 rounded-xl transition-all"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleCreate}
-                className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-purple-500/20"
-              >
-                Create Hub
-              </button>
-            </div>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Department Name</label>
+                  <div className="relative group">
+                    <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-purple-500 transition-colors" size={20} />
+                    <input
+                      type="text"
+                      placeholder="e.g. Media & Communications"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/5 transition-all text-slate-900 font-medium"
+                      onChange={(e) => setNewDept({ ...newDept, name: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Budget (¥)</label>
+                    <div className="relative group">
+                      <TrendingUp className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-purple-500 transition-colors" size={20} />
+                      <input
+                        type="number"
+                        placeholder="50000"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/5 transition-all text-slate-900 font-mono font-bold"
+                        onChange={(e) => setNewDept({ ...newDept, budgetLimit: parseFloat(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Admin Email</label>
+                    <div className="relative group">
+                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-purple-500 transition-colors" size={20} />
+                      <input
+                        type="email"
+                        placeholder="head@hcmj.org"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/5 transition-all text-slate-900 font-medium"
+                        onChange={(e) => setNewDept({ ...newDept, headEmail: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4 mt-12">
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-4 rounded-2xl transition-all"
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={handleCreate}
+                  className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-2xl transition-all shadow-xl shadow-purple-500/20 active:scale-95"
+                >
+                  Build Department Hub
+                </button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
     </main>
   );
 }

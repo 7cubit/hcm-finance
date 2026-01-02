@@ -1,38 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 import { VersioningType, ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import cookieParser from 'cookie-parser';
+
+import { validateEnv } from './common/config/env.config';
 
 async function bootstrap() {
+  const config = validateEnv();
   const app = await NestFactory.create(AppModule);
+  app.use(cookieParser());
 
   // ============================================
   // CORS Configuration
   // ============================================
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://finance.hcmj.org',
-    'https://www.finance.hcmj.org',
-  ];
-
   app.enableCors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, curl, etc.)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      // In development, allow all localhost and 127.0.0.1 origins
-      if (process.env.NODE_ENV !== 'production' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
-        return callback(null, true);
-      }
-
-      callback(new Error('Not allowed by CORS'));
-    },
+    origin: config.FRONTEND_URL,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -65,7 +47,7 @@ async function bootstrap() {
   // ============================================
   // Start Server
   // ============================================
-  const port = process.env.PORT ?? 3001;
+  const port = config.PORT;
   await app.listen(port, '0.0.0.0');
   console.log(`🚀 HCMJ Finance API running at http://0.0.0.0:${port}/api/v1`);
   console.log(`📖 Public endpoints: /api/v1/public/*`);

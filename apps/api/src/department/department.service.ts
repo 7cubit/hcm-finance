@@ -12,10 +12,10 @@ export class DepartmentService {
   constructor(
     private readonly sheetFactory: SheetFactoryService,
     private readonly sheetAccess: SheetAccessService,
-  ) {}
+  ) { }
 
   async findAll() {
-    return prisma.department.findMany({
+    const departments = await prisma.department.findMany({
       include: {
         externalSheets: {
           where: { isActive: true },
@@ -25,10 +25,23 @@ export class DepartmentService {
               orderBy: { createdAt: 'desc' },
               take: 1,
             },
+            stagingTransactions: {
+              where: { status: { not: 'REJECTED' } },
+              select: { amount: true }
+            }
           },
         },
       },
       orderBy: { name: 'asc' },
+    });
+
+    return departments.map(dept => {
+      const activeSheet = dept.externalSheets[0];
+      const spent = activeSheet?.stagingTransactions.reduce((sum, tx) => sum + Number(tx.amount), 0) || 0;
+      return {
+        ...dept,
+        spent,
+      };
     });
   }
 
@@ -76,17 +89,17 @@ export class DepartmentService {
     const fiscalYear = await prisma.fiscalYear.findFirst({
       where: { year, isOpen: true }
     });
-    
+
     if (!fiscalYear) {
-       // Create one if missing for dev
-       await prisma.fiscalYear.create({ 
-         data: { 
-           year, 
-           startDate: new Date(`${year}-01-01`),
-           endDate: new Date(`${year}-12-31`),
-           isOpen: true 
-         } 
-       });
+      // Create one if missing for dev
+      await prisma.fiscalYear.create({
+        data: {
+          year,
+          startDate: new Date(`${year}-01-01`),
+          endDate: new Date(`${year}-12-31`),
+          isOpen: true
+        }
+      });
     }
 
     const externalSheet = await prisma.externalSheet.create({
@@ -122,7 +135,7 @@ export class DepartmentService {
 
     // Grant in Google
     await this.sheetAccess.grantAccess(sheet.googleSheetId, email, role, 'ADMIN');
-    
+
     // Register in DB
     return prisma.sheetUser.create({
       data: {

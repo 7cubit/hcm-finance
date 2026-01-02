@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { Globe } from 'lucide-react';
+import { env } from '@/lib/env';
+import { apiClient } from '@/lib/apiClient';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 interface HealthData {
   status: string;
@@ -19,7 +22,7 @@ export default function AdminLayout({
   useEffect(() => {
     async function checkHealth() {
       try {
-        const res = await fetch('http://127.0.0.1:3001/api/v1/health');
+        const res = await apiClient('/health');
         if (res.ok) {
           const data = await res.json();
           setHealth(data);
@@ -58,11 +61,10 @@ export default function AdminLayout({
                 <a
                   key={link.href}
                   href={link.href}
-                  className={`px-3 py-2 text-sm font-medium transition-colors ${
-                    pathname === link.href
-                      ? 'text-slate-900 dark:text-white border-b-2 border-primary'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-primary dark:hover:text-primary'
-                  }`}
+                  className={`px-3 py-2 text-sm font-medium transition-colors ${pathname === link.href
+                    ? 'text-slate-900 dark:text-white border-b-2 border-primary'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-primary dark:hover:text-primary'
+                    }`}
                 >
                   {link.label}
                 </a>
@@ -87,7 +89,9 @@ export default function AdminLayout({
 
       {/* Page Content */}
       <div className="max-w-[1600px] mx-auto px-4 py-8">
-        {children}
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
       </div>
     </div>
   );

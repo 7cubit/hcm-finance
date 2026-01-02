@@ -13,7 +13,7 @@ export class SheetFactoryService {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
   ];
 
-  constructor(private readonly googleService: GoogleWorkspaceService) {}
+  constructor(private readonly googleService: GoogleWorkspaceService) { }
 
   /**
    * Programmatically generate the 12-month tab structure for a department
@@ -21,6 +21,52 @@ export class SheetFactoryService {
   async generateYearlySheet(departmentId: string, departmentName: string, year: number) {
     const sheets = this.googleService.sheetsClient;
     const drive = this.googleService.driveClient;
+
+    const templateId = process.env.GOOGLE_DRIVE_MASTER_TEMPLATE_ID;
+    const masterFolderId = process.env.GOOGLE_DRIVE_MASTER_FOLDER_ID;
+    const title = `HCMJ_${year}_${departmentName}`;
+
+    if (templateId) {
+      this.logger.log(`📋 Cloning master template ${templateId} for ${departmentName}...`);
+      const copyResponse = await drive.files.copy({
+        fileId: templateId,
+        requestBody: {
+          name: title,
+          parents: masterFolderId ? [masterFolderId] : undefined,
+        },
+        fields: 'id, webViewLink',
+      });
+
+      const spreadsheetId = copyResponse.data.id!;
+      const webViewLink = copyResponse.data.webViewLink!;
+
+      // Optional: Inject developer metadata for the cloned sheet for internal tracking
+      try {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requestBody: {
+            requests: [
+              {
+                createDeveloperMetadata: {
+                  developerMetadata: {
+                    metadataKey: 'department_id',
+                    metadataValue: departmentId,
+                    location: { spreadsheet: true },
+                    visibility: 'DOCUMENT',
+                  }
+                }
+              }
+            ]
+          }
+        });
+      } catch (e) {
+        this.logger.warn(`Could not add developer metadata to cloned sheet: ${e.message}`);
+      }
+
+      return { spreadsheetId, webViewLink };
+    }
+
+    this.logger.log(`⚙️ Generating yearly sheet programmatically for ${departmentName}...`);
 
     // 1. Fetch Funds for the Category dropdown
     const funds = await prisma.fund.findMany({
@@ -30,8 +76,6 @@ export class SheetFactoryService {
     const fundNames = funds.map(f => f.name);
 
     // 2. Prepare the sheet structure
-    const title = `HCMJ_${year}_${departmentName}`;
-    
     // Define the 'READ ME' and 12 monthly sheets
     const sheetRequests: sheets_v4.Schema$Sheet[] = [
       {
@@ -141,7 +185,7 @@ export class SheetFactoryService {
       // I will put Budget in a comment or a different cell. 
       // Let's assume they want Budget in C1 of 'READ ME' or just one tab? 
       // I'll stick to Row 1 headers as requested. I'll put Budget in J1.
-      
+
       // Data Validation for Category (Column C: index 2)
       batchRequests.push({
         setDataValidation: {
@@ -191,7 +235,7 @@ export class SheetFactoryService {
           }
         }
       });
-      
+
       // UUID Column (Column G: index 6) - Making it "hidden" by making it very narrow or just noting it.
       // I'll set its width to 5 pixels.
       batchRequests.push({
@@ -210,7 +254,6 @@ export class SheetFactoryService {
     });
 
     // 5. Move to Master Folder
-    const masterFolderId = process.env.GOOGLE_DRIVE_MASTER_FOLDER_ID;
     if (masterFolderId) {
       await drive.files.update({
         fileId: spreadsheetId,
@@ -270,7 +313,7 @@ export class SheetFactoryService {
       spreadsheetId,
       requestBody: { requests }
     });
-    
+
     this.logger.log(`🔒 Fully locked ${tabs.length} tabs in sheet ${spreadsheetId}`);
   }
 }

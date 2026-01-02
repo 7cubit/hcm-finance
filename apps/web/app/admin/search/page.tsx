@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Search, 
-  Filter, 
-  Download, 
-  FileText, 
-  ExternalLink, 
-  History, 
+import {
+  Search,
+  Filter,
+  Download,
+  FileText,
+  ExternalLink,
+  History,
   AlertCircle,
   TrendingUp,
   ArrowRight,
@@ -39,6 +39,8 @@ interface SearchItem {
   anomalies?: Anomaly[];
 }
 
+import { apiClient } from '@/lib/apiClient';
+
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<{ staging: any[], production: any[], totalSum: number }>({ staging: [], production: [], totalSum: 0 });
@@ -63,9 +65,7 @@ export default function SearchPage() {
       });
       if (filterStatus !== 'ALL') params.append('status', filterStatus);
 
-      const res = await fetch(`http://127.0.0.1:3001/api/v1/search?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      });
+      const res = await apiClient(`/search?${params.toString()}`);
       if (res.ok) {
         setResults(await res.json());
       }
@@ -113,7 +113,7 @@ export default function SearchPage() {
     const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
     return (
       <span>
-        {parts.map((part, i) => 
+        {parts.map((part, i) =>
           part.toLowerCase() === highlight.toLowerCase() ? (
             <mark key={i} className="bg-purple-200 text-purple-900 rounded px-0.5">{part}</mark>
           ) : part
@@ -150,7 +150,7 @@ export default function SearchPage() {
         </div>
 
         <div className="relative group">
-          <input 
+          <input
             type="text"
             placeholder="Search amount, description, or department..."
             className="w-full bg-white border border-slate-200 rounded-[2.5rem] px-10 py-8 text-2xl outline-none focus:border-purple-500 transition-all font-black placeholder:text-slate-300 shadow-xl"
@@ -167,23 +167,21 @@ export default function SearchPage() {
         <div className="flex flex-wrap items-center gap-4 mt-8">
           <div className="flex items-center gap-1.5 bg-white border border-slate-200 p-1.5 rounded-[1.5rem] shadow-sm">
             {['ALL', 'PENDING', 'APPROVED', 'REJECTED'].map(s => (
-              <button 
+              <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
-                className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
-                  filterStatus === s ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/30' : 'text-slate-500 hover:text-slate-900'
-                }`}
+                className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${filterStatus === s ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/30' : 'text-slate-500 hover:text-slate-900'
+                  }`}
               >
                 {s}
               </button>
             ))}
           </div>
 
-          <button 
+          <button
             onClick={() => setShowDeleted(!showDeleted)}
-            className={`flex items-center gap-2 px-6 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${
-              showDeleted ? 'bg-amber-500 text-black border-amber-500' : 'bg-white border-slate-200 text-slate-600'
-            }`}
+            className={`flex items-center gap-2 px-6 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all ${showDeleted ? 'bg-amber-500 text-black border-amber-500' : 'bg-white border-slate-200 text-slate-600'
+              }`}
           >
             <History size={14} /> {showDeleted ? 'Ghost Mode Active' : 'Scan Deleted Data'}
           </button>
@@ -193,7 +191,7 @@ export default function SearchPage() {
           <button onClick={exportCsv} className="flex items-center gap-3 bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-600/30">
             <Download size={16} /> Export Sheets
           </button>
-          
+
           <button onClick={generatePdf} className="flex items-center gap-3 bg-slate-100 hover:bg-slate-200 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border border-slate-200">
             <FileText size={16} /> Audit Report (PDF)
           </button>
@@ -220,7 +218,7 @@ export default function SearchPage() {
       <div className="max-w-6xl mx-auto space-y-6">
         <AnimatePresence>
           {allItems.map((item, idx) => (
-            <motion.div 
+            <motion.div
               key={`${item.source}-${item.id}`}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
@@ -229,9 +227,8 @@ export default function SearchPage() {
             >
               <div className="absolute top-0 right-0 p-6 flex items-center gap-3">
                 {item.status === 'REJECTED' && <span className="bg-red-500 text-white text-[8px] font-black px-3 py-1 rounded-full uppercase tracking-widest">Rejected</span>}
-                <span className={`text-[8px] font-black px-4 py-1.5 rounded-full border tracking-[0.2em] ${
-                  item.source === 'PRODUCTION' ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
-                }`}>
+                <span className={`text-[8px] font-black px-4 py-1.5 rounded-full border tracking-[0.2em] ${item.source === 'PRODUCTION' ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                  }`}>
                   {item.source}
                 </span>
               </div>
@@ -262,9 +259,9 @@ export default function SearchPage() {
                   </p>
                   <div className="flex justify-end gap-3 translate-y-2 opacity-0 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
                     {item.sheetId && (
-                      <a 
-                        href={`https://docs.google.com/spreadsheets/d/${item.sheetId}/edit#gid=0&range=A${item.sheetRowIndex}`} 
-                        target="_blank" 
+                      <a
+                        href={`https://docs.google.com/spreadsheets/d/${item.sheetId}/edit#gid=0&range=A${item.sheetRowIndex}`}
+                        target="_blank"
                         rel="noreferrer"
                         className="p-4 bg-white/5 text-slate-400 rounded-2xl hover:bg-white/10 hover:text-white transition-all flex items-center gap-3 text-[10px] font-black uppercase tracking-widest border border-white/5"
                       >
